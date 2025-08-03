@@ -1,59 +1,89 @@
-# OllamaChatAi
+# Ollama Chat AI
 
-This project was generated using [Angular CLI](https://github.com/angular/angular-cli) version 20.1.4.
+A full-stack ChatGPT-like chat application with real-time streaming, multi-chat support, and persistent chat history using MongoDB.
 
-## Development server
+## Features
 
-To start a local development server, run:
+- **ChatGPT-style UI**: Modern, responsive interface with sidebar, collapsible navigation, and chat input at the bottom.
+- **Streaming AI Responses**: Real-time, token-by-token streaming from backend to frontend for a smooth chat experience.
+- **Multi-Chat Support**: Create, switch, and manage multiple chat sessions, each with its own history.
+- **Persistent Storage**: All chats and messages are saved in MongoDB for long-term access.
+- **Bootstrap & Icons**: Clean design using Bootstrap 5 and Bootstrap Icons.
+- **Collapsible Sidebar**: Sidebar can be toggled for a focused chat view.
+- **Agent/Tool Ready**: Easily extendable to support multiple AI agents or tools.
 
-```bash
-ng serve
-```
+## Technologies Used
 
-Once the server is running, open your browser and navigate to `http://localhost:4200/`. The application will automatically reload whenever you modify any of the source files.
+- **Frontend**: Angular (with signals), Bootstrap 5, Bootstrap Icons
+- **Backend**: Node.js, Express.js, Mongoose, MongoDB
+- **AI Model**: Connects to Ollama or compatible LLM backend (streaming API)
 
-## Code scaffolding
+## Getting Started
 
-Angular CLI includes powerful code scaffolding tools. To generate a new component, run:
+### Prerequisites
+- Node.js (v18+ recommended)
+- npm
+- MongoDB (local or Atlas)
+- Ollama or compatible LLM backend running on `localhost:11434`
 
-```bash
-ng generate component component-name
-```
+### Installation
 
-For a complete list of available schematics (such as `components`, `directives`, or `pipes`), run:
+1. **Clone the repository**
+   ```bash
+   git clone <your-repo-url>
+   cd ollama-chat-ai
+   ```
 
-```bash
-ng generate --help
-```
+2. **Install backend dependencies**
+   ```bash
+   cd server
+   npm install
+   ```
 
-## Building
+3. **Install frontend dependencies**
+   ```bash
+   cd ..
+   npm install
+   ```
 
-To build the project run:
+4. **Configure MongoDB**
+   - Update the MongoDB connection string in `server/index.js` if needed.
 
-```bash
-ng build
-```
+5. **Start the backend server**
+   ```bash
+   cd server
+   node index.js
+   ```
 
-This will compile your project and store the build artifacts in the `dist/` directory. By default, the production build optimizes your application for performance and speed.
+6. **Start the Angular frontend**
+   ```bash
+   cd ..
+   ng serve
+   ```
 
-## Running unit tests
+7. **Ensure Ollama/LLM backend is running**
+   - The backend expects an LLM API at `http://localhost:11434/api/generate`.
 
-To execute unit tests with the [Karma](https://karma-runner.github.io) test runner, use the following command:
+## Usage
 
-```bash
-ng test
-```
+- Open [http://localhost:4200](http://localhost:4200) in your browser.
+- Create a new chat or select an existing one from the sidebar.
+- Type your message and get real-time AI responses.
+- All chats are saved and can be revisited anytime.
 
-## Running end-to-end tests
+## API Endpoints (Backend)
 
-For end-to-end (e2e) testing, run:
+- `POST /api/chats` — Create a new chat
+- `GET /api/chats` — List all chats
+- `GET /api/chats/:id` — Get a specific chat
+- `POST /api/chats/:id/messages` — Add a message to a chat
+- `POST /api/chat` — Stream AI response (proxy to LLM backend)
 
-```bash
-ng e2e
-```
+## Customization
 
-Angular CLI does not come with an end-to-end testing framework by default. You can choose one that suits your needs.
+- **Agents/Tools**: Extend the backend and frontend to support multiple AI agents or external tools.
+- **Styling**: Modify `src/app/app.scss` and Bootstrap classes for a custom look.
 
-## Additional Resources
+## License
 
-For more information on using the Angular CLI, including detailed command references, visit the [Angular CLI Overview and Command Reference](https://angular.dev/tools/cli) page.
+MIT
