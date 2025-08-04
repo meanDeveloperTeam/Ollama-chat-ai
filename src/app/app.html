@@ -11,8 +11,8 @@
         <i class="bi bi-chat-left-text me-2"></i> Chats
       </h4>
       <ul class="nav nav-pills flex-column mb-auto">
-        <li class="nav-item mb-2" *ngFor="let chat of chats()" (click)="loadChat(chat._id)">
-          <a href="#" class="nav-link active d-flex align-items-center">
+        <li class="nav-item mb-2" *ngFor="let chat of chats();  trackBy: trackByChatId" (click)="loadChat(chat._id)">
+          <a href="#" class="nav-link d-flex align-items-center" [ngClass]="{'active' : chat._id === currentChatId()}">
             <i class="bi bi-robot me-2"></i> {{ chat.title || 'Untitled' }}
           </a>
         </li>
@@ -43,7 +43,7 @@
       <i class="bi" [ngClass]="sidebarCollapsed() ? 'bi-list' : 'bi-chevron-left'"></i>
     </button>
     <!-- Chat Messages (dynamic) -->
-    <div class="flex-grow-1 overflow-auto p-4" style="margin-bottom: 80px;">
+    <div #chatContainer class="flex-grow-1 overflow-auto p-4" style="margin-bottom: 80px;">
       <div *ngFor="let msg of messages()" class="mb-3 d-flex" [ngClass]="msg.role === 'user' ? 'justify-content-start' : 'justify-content-end'">
         <div
           [ngClass]="msg.role === 'user'
@@ -64,7 +64,7 @@
     </div>
     <!-- Chat Input (fixed at bottom) -->
     <form class="position-absolute bottom-0 start-0 w-100 bg-white border-top p-3" style="z-index: 10;"
-          (submit)="onSendMessage($event, chatInput.value)">
+          (submit)="onSendMessage($event, chatInput.value); chatInput.value = '';">
       <div class="input-group">
         <input #chatInput type="text" class="form-control" placeholder="Type your message..." autocomplete="off" />
         <button class="btn btn-primary d-flex align-items-center" type="submit">

@@ -1,11 +1,10 @@
 import { CommonModule } from '@angular/common';
-import { Component, signal } from '@angular/core';
-import { RouterOutlet } from '@angular/router';
+import { Component, ElementRef, OnInit, signal, ViewChild } from '@angular/core';
 import { trigger, state, style, transition, animate } from '@angular/animations';
 
 @Component({
   selector: 'app-root',
-  imports: [CommonModule, RouterOutlet],
+  imports: [CommonModule],
   templateUrl: './app.html',
   styleUrl: './app.scss',
   animations: [
@@ -18,9 +17,10 @@ import { trigger, state, style, transition, animate } from '@angular/animations'
     ])
   ]
 })
-export class App {
+export class App implements OnInit {
   protected readonly title = signal('ollama-chat-ai');
   protected readonly sidebarCollapsed = signal(false);
+  @ViewChild('chatContainer') chatContainer!: ElementRef;
 
   ngOnInit() {
     this.loadChats();
@@ -36,6 +36,19 @@ export class App {
 
   protected get sidebarState() {
     return this.sidebarCollapsed() ? 'collapsed' : 'expanded';
+  }
+
+  trackByChatId(index: number, chat: any) {
+    return chat._id;
+  }
+
+  scrollToBottom() {
+    setTimeout(() => {
+      this.chatContainer?.nativeElement?.scrollTo({
+        top: this.chatContainer.nativeElement.scrollHeight,
+        behavior: 'smooth',
+      });
+    }, 100);
   }
 
   async loadChats() {
@@ -54,6 +67,7 @@ export class App {
     const chat = await res.json();
     this.currentChatId.set(chatId);
     this.messages.set(chat.messages || []);
+    this.scrollToBottom();
   }
 
   async createChat(title: string) {
@@ -85,13 +99,14 @@ export class App {
   async handleFullChatFlow(userMessage: string) {
     if (!this.currentChatId) return;
     this.messages.update(msgs => [...msgs, { role: 'user', content: userMessage }]);
-    await this.sendMessageToChat(this.currentChatId()|| '', 'user', userMessage);
+    this.scrollToBottom();
+    await this.sendMessageToChat(this.currentChatId() || '', 'user', userMessage);
     this.messages.update(msgs => [...msgs, { role: 'assistant', content: '' }]);
 
     const response = await fetch('http://localhost:3000/api/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ prompt: userMessage })
+      body: JSON.stringify({ prompt: userMessage, chatId: this.currentChatId() })
     });
 
     const reader = response.body?.getReader();
@@ -123,11 +138,17 @@ export class App {
               }
               return msgs;
             });
+            this.scrollToBottom();
           } catch (e) {
+            console.error('Streaming parse error:', e);
           }
         }
       }
     }
-    await this.sendMessageToChat(this.currentChatId() || '', 'assistant', fullAIResponse);
+    if (!fullAIResponse.trim()) {
+      this.messages.update(msgs => msgs.slice(0, -1)); // Remove assistant placeholder
+    } else {
+      await this.sendMessageToChat(this.currentChatId() || '', 'assistant', fullAIResponse);
+    }
   }
 }

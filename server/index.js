@@ -24,12 +24,60 @@ const chatSchema = new mongoose.Schema({
   messages: [
     {
       role: String,
-      content: String
+      content: String,
+      embedding: {
+        type: [Number],
+        required: false // Embedding is optional, as it might be generated later
+      }
     }
   ],
   createdAt: { type: Date, default: Date.now }
 });
 const Chat = mongoose.model('Chat', chatSchema);
+
+// Helper function to generate embeddings using Ollama
+async function generateEmbedding(text) {
+  try {
+    const response = await fetch("http://localhost:11434/api/embeddings", {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: 'nomic-embed-text:latest', // Using the specified embedding model
+        prompt: text
+      })
+    });
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Ollama embedding API error: ${response.status} ${response.statusText} - ${errorText}`);
+    }
+    const data = await response.json();
+    return data.embedding;
+  } catch (error) {
+    console.error("Error generating embedding:", error);
+    return null; // Return null or handle error as appropriate
+  }
+}
+
+// Helper function to calculate cosine similarity
+function cosineSimilarity(vecA, vecB) {
+  if (!vecA || !vecB || vecA.length !== vecB.length) {
+    return 0;
+  }
+  let dotProduct = 0;
+  let magnitudeA = 0;
+  let magnitudeB = 0;
+  for (let i = 0; i < vecA.length; i++) {
+    dotProduct += vecA[i] * vecB[i];
+    magnitudeA += vecA[i] * vecA[i];
+    magnitudeB += vecB[i] * vecB[i];
+  }
+  magnitudeA = Math.sqrt(magnitudeA);
+  magnitudeB = Math.sqrt(magnitudeB);
+  if (magnitudeA === 0 || magnitudeB === 0) {
+    return 0;
+  }
+  return dotProduct / (magnitudeA * magnitudeB);
+}
 
 app.get('/', (req, res) => {
   res.send('Hello from Express!');
@@ -69,7 +117,13 @@ app.post('/api/chats/:id/messages', async (req, res) => {
     const { role, content } = req.body;
     const chat = await Chat.findById(req.params.id);
     if (!chat) return res.status(404).json({ success: false, error: 'Chat not found' });
-    chat.messages.push({ role, content });
+
+    let embedding = null;
+    if (content && role === 'user') { // Only embed user messages for retrieval
+      embedding = await generateEmbedding(content);
+    }
+
+    chat.messages.push({ role, content, embedding });
     await chat.save();
     res.json({ success: true });
   } catch (err) {
@@ -78,7 +132,38 @@ app.post('/api/chats/:id/messages', async (req, res) => {
 });
 
 app.post('/api/chat', async (req, res) => {
-  console.log("Received request for chat", req.body.prompt);
+  const { prompt, chatId } = req.body;
+  console.log("Received request for chat", prompt, "for chat ID", chatId);
+
+  let augmentedPrompt = prompt;
+  if (chatId) {
+    try {
+      const chat = await Chat.findById(chatId);
+      if (chat && chat.messages.length > 0) {
+        const queryEmbedding = await generateEmbedding(prompt);
+        if (queryEmbedding) {
+          const relevantMessages = chat.messages
+            .filter(msg => msg.role === 'user' && msg.embedding) // Only consider user messages with embeddings
+            .map(msg => ({
+              message: msg.content,
+              similarity: cosineSimilarity(queryEmbedding, msg.embedding)
+            }))
+            .sort((a, b) => b.similarity - a.similarity)
+            .slice(0, 3); // Get top 3 most similar messages
+
+          if (relevantMessages.length > 0) {
+            const context = relevantMessages.map(rm => `Past conversation: ${rm.message}`).join('\n');
+            augmentedPrompt = `${context}\n\nUser query: ${prompt}`;
+            console.log("Augmented prompt:", augmentedPrompt);
+          }
+        }
+      }
+    } catch (error) {
+      console.error("Error during RAG process:", error);
+      // Continue without RAG if an error occurs
+    }
+  }
+
   const response = await fetch("http://localhost:11434/api/generate", {
     method: 'POST',
     headers: {
@@ -86,7 +171,7 @@ app.post('/api/chat', async (req, res) => {
     },
     body: JSON.stringify({
       model: 'qwen2:7b-instruct',
-      prompt: req.body.prompt + "\n\n Please answer concisely in 2-3 lines.",
+      prompt: augmentedPrompt + "\n\n Please answer concisely in 2-3 lines.",
       max_tokens: 100,
       temperature: 0.7,
       top_p: 0.9,
