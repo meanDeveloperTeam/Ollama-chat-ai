@@ -5,6 +5,8 @@ const path = require('path');
 const cors = require('cors');
 const helmet = require('helmet');
 const fetch = require('node-fetch');
+const axios = require('axios');
+const cheerio = require('cheerio');
 // const bodyParser = require('body-parser');
 const mongoose = require('mongoose');
 
@@ -79,6 +81,105 @@ function cosineSimilarity(vecA, vecB) {
   return dotProduct / (magnitudeA * magnitudeB);
 }
 
+// Function to search Wikipedia
+async function searchWikipedia(query) {
+  try {
+    const response = await axios.get(`https://en.wikipedia.org/w/api.php`, {
+      params: {
+        action: 'query',
+        format: 'json',
+        list: 'search',
+        srsearch: query,
+        srlimit: 1, // Get only the top result
+        prop: 'extracts',
+        exintro: true,
+        explaintext: true,
+        redirects: 1,
+        origin: '*'
+      }
+    });
+
+    const searchResults = response.data.query.search;
+    if (searchResults.length > 0) {
+      const pageTitle = searchResults[0].title;
+      const pageResponse = await axios.get(`https://en.wikipedia.org/w/api.php`, {
+        params: {
+          action: 'query',
+          format: 'json',
+          titles: pageTitle,
+          prop: 'extracts',
+          exintro: true,
+          explaintext: true,
+          redirects: 1,
+          origin: '*'
+        }
+      });
+      const pages = pageResponse.data.query.pages;
+      const pageId = Object.keys(pages)[0];
+      return pages[pageId].extract;
+    }
+    return null;
+  } catch (error) {
+    console.error("Error searching Wikipedia:", error);
+    return null;
+  }
+}
+
+// Function to scrape a web page
+async function scrapeWebPage(url) {
+  try {
+    const response = await axios.get(url);
+    const $ = cheerio.load(response.data);
+    // Extract text from common content elements, adjust as needed
+    const text = $('p, h1, h2, h3, h4, h5, h6, li').text();
+    return text.replace(/\s+/g, ' ').trim(); // Normalize whitespace
+  } catch (error) {
+    console.error("Error scraping web page:", error);
+    return null;
+  }
+}
+
+// Function to search GitHub code
+async function searchGitHubCode(query, language) {
+  try {
+    const searchUrl = `https://api.github.com/search/code?q=${encodeURIComponent(query)}+language:${language}&per_page=3`;
+    console.log(`Searching GitHub for: ${searchUrl}`);
+    const response = await axios.get(searchUrl, {
+      headers: {
+        'Accept': 'application/vnd.github.v3.text-match+json'
+      }
+    });
+
+    const items = response.data.items;
+    const codeSnippets = [];
+
+    for (const item of items) {
+      // Fetch the raw content of the file
+      const rawContentUrl = item.url.replace('api.github.com/repos', 'raw.githubusercontent.com').replace('/contents', '');
+      const filePath = item.path;
+      const repoName = item.repository.full_name;
+
+      try {
+        const contentResponse = await axios.get(rawContentUrl);
+        codeSnippets.push({
+          filePath: filePath,
+          repoName: repoName,
+          content: contentResponse.data
+        });
+      } catch (contentError) {
+        console.error(`Error fetching raw content for ${item.path}:`, contentError.message);
+      }
+    }
+    return codeSnippets;
+  } catch (error) {
+    console.error("Error searching GitHub code:", error.message);
+    if (error.response && error.response.status === 403) {
+      console.error("GitHub API Rate Limit Exceeded. Please wait or use a Personal Access Token.");
+    }
+    return null;
+  }
+}
+
 app.get('/', (req, res) => {
   res.send('Hello from Express!');
 });
@@ -136,6 +237,9 @@ app.post('/api/chat', async (req, res) => {
   console.log("Received request for chat", prompt, "for chat ID", chatId);
 
   let augmentedPrompt = prompt;
+  let externalContext = '';
+
+  // Step 1: RAG from chat history
   if (chatId) {
     try {
       const chat = await Chat.findById(chatId);
@@ -151,18 +255,73 @@ app.post('/api/chat', async (req, res) => {
             .sort((a, b) => b.similarity - a.similarity)
             .slice(0, 3); // Get top 3 most similar messages
 
-          if (relevantMessages.length > 0) {
-            console.log("Relevant messages for RAG:", relevantMessages); // Add this line for debugging
-            const context = relevantMessages.map(rm => `User previously said: "${rm.message}"`).join('\n');
-            augmentedPrompt = `Relevant previous context:\n${context}\n\nUser query: ${prompt}\n\nPlease answer naturally based on the context.`;
-            console.log("Augmented prompt:", augmentedPrompt);
+          if (relevantMessages.length > 0 && relevantMessages[0].similarity > 0.7) { // Threshold for relevance
+            console.log("Relevant messages from chat history for RAG:", relevantMessages);
+            externalContext += relevantMessages.map(rm => `User previously said: "${rm.message}"`).join('\n');
           }
         }
       }
     } catch (error) {
-      console.error("Error during RAG process:", error);
-      // Continue without RAG if an error occurs
+      console.error("Error during chat history RAG process:", error);
     }
+  }
+
+  // Step 2: RAG from Wikipedia (if no strong chat history context or if prompt suggests external knowledge)
+  // Simple heuristic: if the prompt contains "who is", "what is", "tell me about", or if externalContext is empty
+  const needsExternalSearch = externalContext.length === 0 ||
+                              /(who is|what is|tell me about)/i.test(prompt);
+
+  if (needsExternalSearch) {
+    try {
+      console.log("Attempting Wikipedia search for:", prompt);
+      const wikipediaContent = await searchWikipedia(prompt);
+      if (wikipediaContent) {
+        console.log("Wikipedia content retrieved.");
+        externalContext += (externalContext.length > 0 ? '\n\n' : '') + `Wikipedia information: ${wikipediaContent}`;
+      } else {
+        console.log("No relevant Wikipedia content found.");
+      }
+    } catch (error) {
+      console.error("Error during Wikipedia RAG process:", error);
+    }
+  }
+
+  // Step 3: RAG from GitHub (for Angular/Node.js specific code)
+  const needsCodeSearch = /(how to|example|code for|angular|node\.js|typescript|javascript)/i.test(prompt);
+
+  if (needsCodeSearch) {
+    try {
+      console.log("Attempting GitHub code search for Angular/Node.js:", prompt);
+      const angularCode = await searchGitHubCode(prompt, 'typescript');
+      const nodejsCode = await searchGitHubCode(prompt, 'javascript');
+
+      if (angularCode && angularCode.length > 0) {
+        console.log("Angular code snippets retrieved.");
+        const codeContext = angularCode.map(snippet => `Angular Code from ${snippet.repoName} (${snippet.filePath}):\n\`\`\`typescript\n${snippet.content}\n\`\`\``).join('\n\n');
+        externalContext += (externalContext.length > 0 ? '\n\n' : '') + codeContext;
+      } else {
+        console.log("No relevant Angular code found.");
+      }
+
+      if (nodejsCode && nodejsCode.length > 0) {
+        console.log("Node.js code snippets retrieved.");
+        const codeContext = nodejsCode.map(snippet => `Node.js Code from ${snippet.repoName} (${snippet.filePath}):\n\`\`\`javascript\n${snippet.content}\n\`\`\``).join('\n\n');
+        externalContext += (externalContext.length > 0 ? '\n\n' : '') + codeContext;
+      } else {
+        console.log("No relevant Node.js code found.");
+      }
+
+    } catch (error) {
+      console.error("Error during GitHub RAG process:", error);
+    }
+  }
+
+  // Step 4: Construct the final augmented prompt
+  if (externalContext.length > 0) {
+    augmentedPrompt = `Relevant context:\n${externalContext}\n\nUser query: ${prompt}\n\nPlease answer naturally based on the provided context.`;
+    console.log("Augmented prompt with external context:", augmentedPrompt);
+  } else {
+    console.log("No external context added. Original prompt used.");
   }
 
   const response = await fetch("http://localhost:11434/api/generate", {
@@ -171,7 +330,7 @@ app.post('/api/chat', async (req, res) => {
       'Content-Type': 'application/json'
     },
     body: JSON.stringify({
-      model: 'qwen3:8b',
+      model: 'qwen3:4b',
       prompt: augmentedPrompt,
       presence_penalty: 0.6,
       frequency_penalty: 0.6,
