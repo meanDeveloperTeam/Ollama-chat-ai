@@ -1,11 +1,8 @@
 <!-- ChatGPT-like UI with sidebar and chat area, now with dynamic streaming chat integration -->
 <div class="container-fluid vh-100 d-flex flex-row p-0" style="height: 100vh;">
   <!-- Sidebar -->
-  <div
-    class="bg-light border-end h-100 overflow-hidden"
-    [@sidebarCollapse]="sidebarState"
-    style="will-change: width, min-width, opacity;"
-  >
+  <div class="bg-light border-end h-100 overflow-hidden" [@sidebarCollapse]="sidebarState"
+    style="will-change: width, min-width, opacity;">
     <div class="d-flex flex-column h-100 p-3" *ngIf="!sidebarCollapsed()">
       <h4 class="mb-4 d-flex align-items-center">
         <i class="bi bi-chat-left-text me-2"></i> Chats
@@ -33,40 +30,63 @@
   <!-- Main Chat Area -->
   <div class="flex-grow-1 d-flex flex-column position-relative bg-white">
     <!-- Sidebar Toggle Button -->
-    <button
-      class="btn btn-light position-absolute top-0 start-0 m-2 shadow-sm"
-      style="z-index: 20;"
-      (click)="toggleSidebar()"
-      [ngClass]="{ 'ms-0': sidebarCollapsed(), 'ms-2': !sidebarCollapsed() }"
-      title="Toggle sidebar"
-    >
+    <button class="btn btn-light position-absolute top-0 start-0 m-2 shadow-sm" style="z-index: 20;"
+      (click)="toggleSidebar()" [ngClass]="{ 'ms-0': sidebarCollapsed(), 'ms-2': !sidebarCollapsed() }"
+      title="Toggle sidebar">
       <i class="bi" [ngClass]="sidebarCollapsed() ? 'bi-list' : 'bi-chevron-left'"></i>
     </button>
+
     <!-- Chat Messages (dynamic) -->
     <div #chatContainer class="flex-grow-1 overflow-auto p-4" style="margin-bottom: 80px;">
-      <div *ngFor="let msg of messages()" class="mb-3 d-flex" [ngClass]="msg.role === 'user' ? 'justify-content-start' : 'justify-content-end'">
-        <div
-          [ngClass]="msg.role === 'user'
-            ? 'bg-light border rounded p-3 me-auto d-flex align-items-end'
-            : 'bg-secondary text-white rounded p-3 ms-auto d-flex align-items-end'"
-          style="max-width: 60%;"
-        >
-          <ng-container *ngIf="msg.role === 'user'">
-            <i class="bi bi-person-circle me-2"></i>
-            <span>{{ msg.content }}</span>
-          </ng-container>
-          <ng-container *ngIf="msg.role === 'assistant'">
-            <span class="me-2">{{ msg.content }}</span>
-            <i class="bi bi-robot"></i>
+      <div *ngFor="let msg of messages()" class="mb-3 d-flex"
+        [ngClass]="msg.role === 'user' ? 'justify-content-start' : 'justify-content-end'">
+
+        <div [ngClass]="msg.role === 'user'
+            ? 'bg-light border rounded p-3 me-auto'
+            : 'bg-secondary text-white rounded p-3 ms-auto'" style="max-width: 60%; white-space: pre-wrap;">
+
+          <!-- Message blocks rendering -->
+          <ng-container *ngFor="let block of msg.blocks">
+            <ng-container [ngSwitch]="block.type">
+
+              <!-- Text block -->
+              <span *ngSwitchCase="'text'">{{ block.content }}</span>
+
+              <!-- Code block -->
+              <pre *ngSwitchCase="'code'" class="bg-dark text-white p-2 rounded mt-2">
+                <code>{{ block.content }}</code>
+              </pre>
+
+              <!-- Output block for assistant's code -->
+              <div *ngIf="msg.role === 'assistant' && block.type === 'code'"
+                class="bg-light border rounded p-2 mt-2 mb-2 text-dark">
+                <strong>Output:</strong>
+                <div class="mt-1" style="white-space: pre-wrap;">
+                  Code executed successfully (mock output)
+                </div>
+              </div>
+
+              <div *ngSwitchCase="'think'"
+                class="bg-secondary-subtle text-dark border-start border-3 border-secondary p-3 mb-2 rounded"
+                style="font-family: monospace;">
+                <strong>&lt;think&gt;</strong><br>
+                <div style="white-space: pre-wrap;">{{ block.content }}</div>
+                <strong>&lt;/think&gt;</strong>
+              </div>
+
+            </ng-container>
           </ng-container>
         </div>
       </div>
     </div>
+
     <!-- Chat Input (fixed at bottom) -->
     <form class="position-absolute bottom-0 start-0 w-100 bg-white border-top p-3" style="z-index: 10;"
-          (submit)="onSendMessage($event, chatInput.value); chatInput.value = '';">
+      (submit)="onSendMessage($event, chatInput.value); chatInput.value = '';">
+
       <div class="input-group">
-        <input #chatInput type="text" class="form-control" placeholder="Type your message..." autocomplete="off" />
+        <textarea #chatInput class="form-control" placeholder="Type your message..." rows="1"
+          style="resize: none; overflow-y: auto;"></textarea>
         <button class="btn btn-primary d-flex align-items-center" type="submit">
           <span class="me-1">Send</span>
           <i class="bi bi-send"></i>

@@ -1,5 +1,5 @@
 import { CommonModule } from '@angular/common';
-import { Component, ElementRef, OnInit, signal, ViewChild } from '@angular/core';
+import { Component, ElementRef, HostListener, OnInit, signal, ViewChild } from '@angular/core';
 import { trigger, state, style, transition, animate } from '@angular/animations';
 
 @Component({
@@ -21,6 +21,7 @@ export class App implements OnInit {
   protected readonly title = signal('ollama-chat-ai');
   protected readonly sidebarCollapsed = signal(false);
   @ViewChild('chatContainer') chatContainer!: ElementRef;
+  @ViewChild('chatInput') chatInput!: ElementRef<HTMLTextAreaElement>;
 
   ngOnInit() {
     this.loadChats();
@@ -28,7 +29,9 @@ export class App implements OnInit {
 
   chats = signal<any[]>([]);
   currentChatId = signal<string | null>(null);
-  public messages = signal<{ role: 'user' | 'assistant', content: string }[]>([]);
+  public messages = signal<
+    { role: 'user' | 'assistant', blocks: { type: 'text' | 'code' | 'think', content: string }[] }[]
+  >([]);
 
   protected toggleSidebar() {
     this.sidebarCollapsed.update(v => !v);
@@ -66,7 +69,20 @@ export class App implements OnInit {
     const res = await fetch(`http://localhost:3000/api/chats/${chatId}`);
     const chat = await res.json();
     this.currentChatId.set(chatId);
-    this.messages.set(chat.messages || []);
+
+    const parsedMessages = (chat.messages || []).map((msg: any) => {
+      if (msg.blocks) {
+        return msg; // Already in new format
+      } else {
+        // Convert from old format (with content string)
+        return {
+          role: msg.role,
+          blocks: this.parseAssistantResponse(msg.content || '')
+        };
+      }
+    });
+
+    this.messages.set(parsedMessages);
     this.scrollToBottom();
   }
 
@@ -89,19 +105,78 @@ export class App implements OnInit {
     });
   }
 
+  @HostListener('input', ['$event.target'])
+  onInput(textArea: EventTarget | null): void {
+    if (textArea) {
+      this.adjustTextareaHeight(textArea as HTMLTextAreaElement);
+    }
+  }
+
+  private adjustTextareaHeight(textArea: HTMLTextAreaElement): void {
+    textArea.style.height = 'auto';
+    textArea.style.height = textArea.scrollHeight + 'px';
+  }
+
   onSendMessage(event: Event, value: string) {
     event.preventDefault();
     if (value && value.trim() && this.currentChatId()) {
       this.handleFullChatFlow(value.trim());
+      this.chatInput.nativeElement.value = ''; // Clear the textarea
+      this.adjustTextareaHeight(this.chatInput.nativeElement); // Reset textarea height
     }
   }
 
+  parseAssistantResponse(fullText: string): { type: 'text' | 'code' | 'think', content: string }[] {
+    const parts: { type: 'text' | 'code' | 'think', content: string }[] = [];
+
+    // Matches both code blocks and <think> blocks
+    const combinedRegex = /```(.*?)```|<think>([\s\S]*?)<\/think>/gs;
+
+    let lastIndex = 0;
+
+    for (const match of fullText.matchAll(combinedRegex)) {
+      const matchIndex = match.index!;
+
+      // Add preceding plain text
+      if (matchIndex > lastIndex) {
+        parts.push({ type: 'text', content: fullText.slice(lastIndex, matchIndex) });
+      }
+
+      if (match[1]) {
+        // code block
+        parts.push({ type: 'code', content: match[1].trim() });
+      } else if (match[2]) {
+        // think block
+        parts.push({ type: 'think', content: match[2].trim() });
+      }
+
+      lastIndex = matchIndex + match[0].length;
+    }
+
+    // Add any remaining plain text
+    if (lastIndex < fullText.length) {
+      parts.push({ type: 'text', content: fullText.slice(lastIndex) });
+    }
+
+    return parts;
+  }
+
+
   async handleFullChatFlow(userMessage: string) {
     if (!this.currentChatId) return;
-    this.messages.update(msgs => [...msgs, { role: 'user', content: userMessage }]);
+
+    this.messages.update(msgs => [...msgs, {
+      role: 'user',
+      blocks: [{ type: 'text', content: userMessage }]
+    }]);
     this.scrollToBottom();
     await this.sendMessageToChat(this.currentChatId() || '', 'user', userMessage);
-    this.messages.update(msgs => [...msgs, { role: 'assistant', content: '' }]);
+
+    // Temporary assistant placeholder
+    this.messages.update(msgs => [...msgs, {
+      role: 'assistant',
+      blocks: []
+    }]);
 
     const response = await fetch('http://localhost:3000/api/chat', {
       method: 'POST',
@@ -127,28 +202,27 @@ export class App implements OnInit {
             const json = JSON.parse(line);
             const chunk = json.response || '';
             fullAIResponse += chunk;
-            this.messages.update(msgs => {
-              if (msgs.length > 0) {
-                const updated = [...msgs];
-                updated[updated.length - 1] = {
-                  ...updated[updated.length - 1],
-                  content: updated[updated.length - 1].content + chunk
-                };
-                return updated;
-              }
-              return msgs;
-            });
             this.scrollToBottom();
-          } catch (e) {
-            console.error('Streaming parse error:', e);
-          }
+          } catch { }
         }
       }
     }
-    if (!fullAIResponse.trim()) {
-      this.messages.update(msgs => msgs.slice(0, -1)); // Remove assistant placeholder
-    } else {
+
+    const parsedBlocks = this.parseAssistantResponse(fullAIResponse);
+
+    this.messages.update(msgs => {
+      const updated = [...msgs];
+      updated[updated.length - 1] = {
+        role: 'assistant',
+        blocks: parsedBlocks
+      };
+      return updated;
+    });
+
+    if (parsedBlocks.length > 0) {
       await this.sendMessageToChat(this.currentChatId() || '', 'assistant', fullAIResponse);
+    } else {
+      this.messages.update(msgs => msgs.slice(0, -1));
     }
   }
 }

@@ -5,10 +5,10 @@ const path = require('path');
 const cors = require('cors');
 const helmet = require('helmet');
 const fetch = require('node-fetch');
-const bodyParser = require('body-parser');
+// const bodyParser = require('body-parser');
 const mongoose = require('mongoose');
 
-app.use(bodyParser.json());
+// app.use(bodyParser.json());
 app.use(helmet());
 app.use(cors('*'));
 app.use(express.static(path.join(__dirname, 'public')));
@@ -17,7 +17,7 @@ app.use(express.json());
 mongoose.connect('mongodb+srv://princeark786:Moyr8b1HQgnV4lx9@firstmongodb.prqz8aj.mongodb.net/?retryWrites=true&w=majority&appName=FirstMongoDB', { useNewUrlParser: true, useUnifiedTopology: true })
   .then(() => console.log('MongoDB connected'))
   .catch(err => console.error('MongoDB connection error:', err));
-
+mongoose.set('strictQuery', true);
 const chatSchema = new mongoose.Schema({
   title: String,
   userId: String,
@@ -152,8 +152,9 @@ app.post('/api/chat', async (req, res) => {
             .slice(0, 3); // Get top 3 most similar messages
 
           if (relevantMessages.length > 0) {
-            const context = relevantMessages.map(rm => `Past conversation: ${rm.message}`).join('\n');
-            augmentedPrompt = `${context}\n\nUser query: ${prompt}`;
+            console.log("Relevant messages for RAG:", relevantMessages); // Add this line for debugging
+            const context = relevantMessages.map(rm => `User previously said: "${rm.message}"`).join('\n');
+            augmentedPrompt = `Relevant previous context:\n${context}\n\nUser query: ${prompt}\n\nPlease answer naturally based on the context.`;
             console.log("Augmented prompt:", augmentedPrompt);
           }
         }
@@ -170,12 +171,23 @@ app.post('/api/chat', async (req, res) => {
       'Content-Type': 'application/json'
     },
     body: JSON.stringify({
-      model: 'qwen2:7b-instruct',
-      prompt: augmentedPrompt + "\n\n Please answer concisely in 2-3 lines.",
-      max_tokens: 100,
-      temperature: 0.7,
+      model: 'qwen3:8b',
+      prompt: augmentedPrompt,
+      presence_penalty: 0.6,
+      frequency_penalty: 0.6,
+      top_k: 50,
       top_p: 0.9,
-      stop: ['\n'],
+      n: 1,
+      temperature: 0.7,
+      max_new_tokens: 500,
+      repetition_penalty: 1.1,
+      best_of: 1,
+      logprobs: 0,
+      logit_bias: {},
+      seed: null,
+      echo: false,
+      stop_sequences: [],
+      max_tokens: 1000,
       stream: true
     })
   });
@@ -193,11 +205,16 @@ app.post('/api/chat', async (req, res) => {
           const json = JSON.parse(line);
           res.write(JSON.stringify(json) + '\n');
         } catch (e) {
+          console.error('Error parsing Ollama stream chunk:', e);
+          // If a chunk is not valid JSON, it might be an error message or malformed data.
+          // We should stop processing and end the response to prevent further client-side errors.
+          res.end();
+          return;
         }
       }
     }
   }
-  res.end();
+  res.end(); // Ensure response is always ended
 });
 
 app.listen(port, () => {
