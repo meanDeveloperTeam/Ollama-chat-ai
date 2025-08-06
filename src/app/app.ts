@@ -105,6 +105,39 @@ export class App implements OnInit {
     });
   }
 
+  /* ---------------- Chat / Message Deletion ----------------*/
+  async deleteChat(chatId: string) {
+    if (!confirm('Delete this chat?')) return;
+    await fetch(`http://localhost:3000/api/chats/${chatId}`, {
+      method: 'DELETE'
+    });
+    await this.loadChats();
+    // Auto-load first chat if any
+    if (this.chats().length > 0) {
+      this.loadChat(this.chats()[0]._id);
+    } else {
+      this.currentChatId.set(null);
+      this.messages.set([]);
+    }
+  }
+
+  async deleteMessage(index: number) {
+    if (!confirm('Delete this message?')) return;
+    // Optimistically remove locally
+    this.messages.update(msgs => {
+      const updated = [...msgs];
+      updated.splice(index, 1);
+      return updated;
+    });
+
+    // Persist change on server (simple PUT replacing all messages)
+    if (this.currentChatId()) {
+      await fetch(`http://localhost:3000/api/chats/${this.currentChatId()}/messages/${index}`, {
+        method: 'DELETE'
+      }).catch(() => {}); // ignore error for now
+    }
+  }
+
   @HostListener('input', ['$event.target'])
   onInput(textArea: EventTarget | null): void {
     if (textArea) {
@@ -202,26 +235,29 @@ export class App implements OnInit {
             const json = JSON.parse(line);
             const chunk = json.response || '';
             fullAIResponse += chunk;
+            // Update assistant message blocks incrementally to show streaming response
+            // Update assistant message blocks incrementally to show streaming response
+            this.messages.update(msgs => {
+              const updated = [...msgs];
+              if (updated.length > 0) {
+                const last = updated[updated.length - 1];
+                if (last.role === 'assistant') {
+                  last.blocks = this.parseAssistantResponse(fullAIResponse);
+                }
+              }
+              return updated;
+            });
             this.scrollToBottom();
           } catch { }
         }
       }
     }
 
-    const parsedBlocks = this.parseAssistantResponse(fullAIResponse);
-
-    this.messages.update(msgs => {
-      const updated = [...msgs];
-      updated[updated.length - 1] = {
-        role: 'assistant',
-        blocks: parsedBlocks
-      };
-      return updated;
-    });
-
-    if (parsedBlocks.length > 0) {
+    // After streaming is complete, save the full response to the chat history
+    if (fullAIResponse.length > 0) {
       await this.sendMessageToChat(this.currentChatId() || '', 'assistant', fullAIResponse);
     } else {
+      // If no content was streamed, remove the temporary assistant message
       this.messages.update(msgs => msgs.slice(0, -1));
     }
   }

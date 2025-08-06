@@ -8,10 +8,12 @@
         <i class="bi bi-chat-left-text me-2"></i> Chats
       </h4>
       <ul class="nav nav-pills flex-column mb-auto">
-        <li class="nav-item mb-2" *ngFor="let chat of chats();  trackBy: trackByChatId" (click)="loadChat(chat._id)">
-          <a href="#" class="nav-link d-flex align-items-center" [ngClass]="{'active' : chat._id === currentChatId()}">
+        <li class="nav-item mb-2 position-relative" *ngFor="let chat of chats();  trackBy: trackByChatId" (click)="loadChat(chat._id)">
+          <a href="#" class="nav-link d-flex align-items-center pe-4" [ngClass]="{'active' : chat._id === currentChatId()}">
             <i class="bi bi-robot me-2"></i> {{ chat.title || 'Untitled' }}
           </a>
+          <i class="bi bi-trash text-danger position-absolute top-50 end-0 translate-middle-y me-2" title="Delete chat"
+             (click)="deleteChat(chat._id); $event.stopPropagation()" style="cursor:pointer;"></i>
         </li>
         <li class="nav-item mb-2" (click)="createChat('New Chat')">
           <a href="#" class="nav-link d-flex align-items-center">
@@ -38,7 +40,7 @@
 
     <!-- Chat Messages (dynamic) -->
     <div #chatContainer class="flex-grow-1 overflow-auto p-4" style="margin-bottom: 80px;">
-      <div *ngFor="let msg of messages()" class="mb-3 d-flex"
+      <div *ngFor="let msg of messages(); let i = index" class="mb-3 d-flex position-relative"
         [ngClass]="msg.role === 'user' ? 'justify-content-start' : 'justify-content-end'">
 
         <div [ngClass]="msg.role === 'user'
@@ -66,17 +68,25 @@
                 </div>
               </div>
 
-              <div *ngSwitchCase="'think'"
-                class="bg-secondary-subtle text-dark border-start border-3 border-secondary p-3 mb-2 rounded"
-                style="font-family: monospace;">
-                <strong>&lt;think&gt;</strong><br>
-                <div style="white-space: pre-wrap;">{{ block.content }}</div>
-                <strong>&lt;/think&gt;</strong>
-              </div>
+              <details *ngSwitchCase="'think'" open
+              class="thinking-effect"
+              style="font-family: 'JetBrains Mono', monospace;">
+                <summary class="d-flex align-items-center">
+                  <i class="bi bi-lightbulb-fill text-warning me-2"></i>
+                  <span>Thoughts</span>
+                  <div class="dots-bounce ms-2">
+                    <span></span><span></span><span></span>
+                  </div>
+                </summary>
+                <div class="mt-2" style="white-space: pre-wrap;">{{ block.content }}</div>
+              </details>
 
             </ng-container>
           </ng-container>
         </div>
+        <i class="bi bi-x-circle-fill text-danger position-absolute top-0 end-0 translate-middle"
+           title="Delete message" style="cursor:pointer; font-size: 0.9rem;"
+           (click)="deleteMessage(i); $event.stopPropagation()"></i>
       </div>
     </div>
 

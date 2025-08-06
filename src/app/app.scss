@@ -1,0 +1,99 @@
+/* You can add global styles to this file, and also import other style files */
+
+/* Basic styling for the thinking dots effect */
+@keyframes blink {
+  0% {
+    opacity: 0.2;
+  }
+  20% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0.2;
+  }
+}
+
+.thinking-dots {
+  display: inline-block;
+  animation: blink 1.4s infinite;
+  animation-fill-mode: both;
+}
+
+.thinking-dots:nth-child(2) {
+  animation-delay: 0.2s;
+}
+
+.thinking-dots:nth-child(3) {
+  animation-delay: 0.4s;
+}
+
+/* Grok-like styling for thinking blocks */
+.thinking-effect {
+  background: radial-gradient(circle at 10% 20%, #282a36 0%, #121212 80%);
+  color: #f8f8f2;
+  border-left: 4px solid #ff8b39;
+  font-family: "JetBrains Mono", monospace;
+  position: relative;
+  overflow: hidden;
+}
+
+.thinking-effect::before {
+  content: '';
+  position: absolute;
+  top: -50%;
+  left: -50%;
+  width: 200%;
+  height: 200%;
+  background: rgba(255, 139, 57, 0.05);
+  transform: rotate(25deg);
+}
+
+.thinking-effect .thinking-dots {
+  color: #ff8b39;
+  font-weight: bold;
+}
+
+/* Bouncing dots for streaming indicator */
+@keyframes bounce {
+  0%, 80%, 100% {
+    transform: scale(0);
+  }
+  40% {
+    transform: scale(1);
+  }
+}
+
+.dots-bounce {
+  display: inline-flex;
+  align-items: center;
+  height: 10px;
+}
+
+.dots-bounce span {
+  width: 6px;
+  height: 6px;
+  margin-right: 3px;
+  background: #ff8b39;
+  border-radius: 50%;
+  display: inline-block;
+  animation: bounce 1.4s infinite both;
+}
+
+.dots-bounce span:nth-child(1) {
+  animation-delay: -0.32s;
+}
+
+.dots-bounce span:nth-child(2) {
+  animation-delay: -0.16s;
+}
+
+/* Remove default marker of details */
+details.thinking-effect summary::-webkit-details-marker {
+  display: none;
+}
+
+/* Summary styling */
+.thinking-effect summary {
+  cursor: pointer;
+  user-select: none;
+}

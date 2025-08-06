@@ -139,6 +139,49 @@ async function scrapeWebPage(url) {
   }
 }
 
+// Function to search StackBlitz projects (simple scrape of public search page)
+async function searchStackBlitz(query) {
+  try {
+    const searchUrl = `https://stackblitz.com/search?term=${encodeURIComponent(query)}`;
+    console.log(`Searching StackBlitz for: ${searchUrl}`);
+    const response = await axios.get(searchUrl, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0'
+      }
+    });
+    const $ = cheerio.load(response.data);
+    const projects = [];
+    // Each result tile contains data-project property with slug e.g. "angular-ivy-abc123"
+    $('a[data-project]').slice(0, 3).each((_, el) => {
+      const projectSlug = $(el).attr('data-project');
+      const title = $(el).find('.result-title').text().trim();
+      if (projectSlug) {
+        projects.push({ slug: projectSlug, title });
+      }
+    });
+
+    // Fetch README.md or src/main.ts from each project using StackBlitz raw endpoint
+    const snippets = [];
+    for (const proj of projects) {
+      try {
+        const rawUrl = `https://stackblitz.com/github/${proj.slug}/raw/README.md`;
+        const fileResp = await axios.get(rawUrl);
+        snippets.push({
+          project: proj.title || proj.slug,
+          content: fileResp.data
+        });
+      } catch {
+        // Ignore if README not accessible
+      }
+    }
+
+    return snippets;
+  } catch (error) {
+    console.error('Error searching StackBlitz:', error.message);
+    return null;
+  }
+}
+
 // Function to search GitHub code
 async function searchGitHubCode(query, language) {
   try {
@@ -232,6 +275,35 @@ app.post('/api/chats/:id/messages', async (req, res) => {
   }
 });
 
+// Delete a chat by ID
+app.delete('/api/chats/:id', async (req, res) => {
+  try {
+    await Chat.findByIdAndDelete(req.params.id);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Delete a single message in a chat by its array index
+app.delete('/api/chats/:id/messages/:index', async (req, res) => {
+  try {
+    const chat = await Chat.findById(req.params.id);
+    if (!chat) return res.status(404).json({ success: false, error: 'Chat not found' });
+
+    const idx = parseInt(req.params.index, 10);
+    if (isNaN(idx) || idx < 0 || idx >= chat.messages.length) {
+      return res.status(400).json({ success: false, error: 'Invalid message index' });
+    }
+
+    chat.messages.splice(idx, 1);
+    await chat.save();
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 app.post('/api/chat', async (req, res) => {
   const { prompt, chatId } = req.body;
   console.log("Received request for chat", prompt, "for chat ID", chatId);
@@ -311,6 +383,42 @@ app.post('/api/chat', async (req, res) => {
         console.log("No relevant Node.js code found.");
       }
 
+      // StackBlitz code search
+      try {
+        console.log("Attempting StackBlitz search:", prompt);
+        const blitzSnippets = await searchStackBlitz(prompt);
+        if (blitzSnippets && blitzSnippets.length > 0) {
+          console.log("StackBlitz snippets retrieved.");
+          const blitzContext = blitzSnippets.map(snip => `StackBlitz project ${snip.project}:\n\
+\
+\
+${snip.content}\n\
+\
+`).join('\n\n');
+          externalContext += (externalContext.length > 0 ? '\n\n' : '') + blitzContext;
+        } else {
+          console.log("No relevant StackBlitz project found.");
+        }
+      } catch (error) {
+        console.error("Error during StackBlitz RAG process:", error);
+      }
+
+      // Scrape any direct URLs mentioned in the prompt (max 3)
+      try {
+        const urlMatches = (prompt.match(/https?:\/\/[^\s]+/g) || []).slice(0, 3);
+        for (const url of urlMatches) {
+          console.log("Scraping web page for RAG:", url);
+          const pageContent = await scrapeWebPage(url);
+          if (pageContent && pageContent.length > 50) {
+            // Truncate long pages to first ~800 chars to keep context size reasonable
+            const snippet = pageContent.slice(0, 800);
+            externalContext += (externalContext.length > 0 ? '\n\n' : '') + `Content from ${url}:\n${snippet}`;
+          }
+        }
+      } catch (error) {
+        console.error("Error during web page scrape RAG process:", error);
+      }
+
     } catch (error) {
       console.error("Error during GitHub RAG process:", error);
     }
@@ -330,7 +438,7 @@ app.post('/api/chat', async (req, res) => {
       'Content-Type': 'application/json'
     },
     body: JSON.stringify({
-      model: 'qwen3:4b',
+      model: 'mistral:7b',
       prompt: augmentedPrompt,
       presence_penalty: 0.6,
       frequency_penalty: 0.6,
