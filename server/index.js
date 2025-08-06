@@ -304,9 +304,38 @@ app.delete('/api/chats/:id/messages/:index', async (req, res) => {
   }
 });
 
+// Run autonomous agent on demand
+app.post('/api/agent', async (req, res) => {
+  const { task } = req.body || {};
+  if (!task) return res.status(400).json({ success: false, error: 'No task provided' });
+
+  const { spawn } = require('child_process');
+  const child = spawn('node', [path.join(__dirname, 'agent.js'), task]);
+
+  let output = '';
+  child.stdout.on('data', (d) => { output += d.toString(); });
+  child.stderr.on('data', (d) => { output += d.toString(); });
+  child.on('close', (code) => {
+    res.json({ success: true, code, output });
+  });
+});
+
 app.post('/api/chat', async (req, res) => {
   const { prompt, chatId } = req.body;
   console.log("Received request for chat", prompt, "for chat ID", chatId);
+
+  // === Agent trigger: if user message starts with !agent or /agent ===
+  if (/^\s*(?:!agent|\/agent)\b/i.test(prompt)) {
+    const task = prompt.replace(/^\s*(?:!agent|\/agent)\b/i, '').trim();
+    if (!task) return res.status(400).json({ success: false, error: 'Agent task missing after command' });
+    const { spawn } = require('child_process');
+    const child = spawn('node', [path.join(__dirname, 'agent.js'), task]);
+    res.setHeader('Content-Type', 'text/plain');
+    child.stdout.on('data', (d) => res.write(d));
+    child.stderr.on('data', (d) => res.write(d));
+    child.on('close', () => res.end());
+    return; // skip normal chat flow
+  }
 
   let augmentedPrompt = prompt;
   let externalContext = '';
